@@ -2,6 +2,9 @@
 
 This repository stores a small, versioned English vocabulary database for computer science and Python study. The workbook is designed for quick lookup, review, and incremental extension in Excel.
 
+## Pictures
+You can see every version's picture in fold "pictures"
+
 ## Current version
 
 `v0.2` is the current release. It contains 18 records: the six terms from the v0.1 prototype and twelve additional terms selected from page 1 of the supplied glossary document.
