@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Personal Vocabulary</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header><h1>Personal Vocabulary</h1><p>Read, connect, and remember.</p><p id="health" role="status">Connecting...</p></header>
+  <main>
+    <nav aria-label="Workspace"><button data-tab="agent" aria-pressed="true">Import &amp; ask</button><button data-tab="wiki" aria-pressed="false">Vocabulary &amp; Wiki</button><button data-tab="learn" aria-pressed="false">Learn</button><button data-tab="logs" aria-pressed="false">Activity</button></nav>
+    <p id="notice" role="alert"></p>
+    <section id="agent" class="tab">
+      <h2>Import an article or ask about your words</h2>
+      <form id="agent-form"><label>Instruction<input id="instruction" value="Import the vocabulary in this article" required></label><label>English article<textarea id="article" rows="8" placeholder="Paste your article here. Leave blank for a lookup or ranking request."></textarea></label><button type="submit">Run Agent</button></form>
+      <p id="agent-progress" role="status" aria-live="polite"></p><div id="scope"></div><div id="result"></div>
+    </section>
+    <section id="wiki" class="tab" hidden>
+      <h2>Vocabulary &amp; Wiki</h2><form id="search-form"><label>Search terms, meanings, examples, or notes<input id="query" required placeholder="Search your vocabulary"></label><button>Search</button></form><div id="search-results"></div><article id="detail"></article>
+    </section>
+    <section id="learn" class="tab" hidden>
+      <h2>Today's practice</h2><p id="today"></p><button id="next-question">Next question</button><div id="question"></div>
+    </section>
+    <section id="logs" class="tab" hidden><h2>Activity</h2><button id="reload-logs">Refresh</button><div id="activity"></div><pre id="log-detail"></pre></section>
+  </main>
+  <footer>Vocabulary data stays on this device. Agent requests use DeepSeek in the cloud.</footer>
+  <script src="/static/app.js" defer></script>
+</body></html>
