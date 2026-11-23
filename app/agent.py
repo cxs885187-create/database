@@ -71,6 +71,12 @@ class VocabularyAgent:
                 text = request.text if request.text is not None else request.user_input
                 pool = await asyncio.to_thread(self.analyzer.analyze,text,{})
                 decision = await self.model.decide(request.user_input,pool.as_dict())
+                # The second field accepts either an English article or a direct natural-language query.
+                # If it has no English tokens and the instruction is still the default import label,
+                # classify the actual query instead of forcing an ingest path.
+                default_instruction = 'import the vocabulary in this article'
+                if request.text and not pool.candidates and request.user_input.strip().lower() == default_instruction:
+                    decision = await self.model.decide(request.text, {'non_english_input': True})
                 if decision.intent=='clarify':
                     yield event('clarify',{'question':decision.question or 'Paste an English article or ask about your vocabulary.'})
                     return
@@ -86,7 +92,7 @@ class VocabularyAgent:
                         yield item
                     return
                 if not pool.candidates:
-                    yield event('clarify',{'question':'No English vocabulary was found. Paste an English sentence or article.'})
+                    yield event('clarify',{'question':'No English vocabulary was found. Paste an English article, or ask a direct vocabulary question in the instruction or text box.'})
                     return
                 matches = self.repo.lookup(pool.candidates)
                 pool.existing_set = set(matches)

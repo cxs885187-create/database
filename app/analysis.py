@@ -33,7 +33,7 @@ class Analyzer:
         doc = self.nlp(text)
         counts,tags,sentences = Counter(),{},{}
         for token in doc:
-            if not token.is_alpha or token.is_stop or len(token.text)<2:
+            if not token.is_ascii or not token.is_alpha or token.is_stop or len(token.text)<2:
                 continue
             lemma = token.lemma_.lower()
             counts[lemma] += 1

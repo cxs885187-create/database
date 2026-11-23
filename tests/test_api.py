@@ -64,3 +64,25 @@ def test_missing_api_key_is_clear_and_does_not_write(tmp_path):
         assert events[-1][0]=='error'
         assert events[-1][1]['code']=='model_unavailable'
         assert client.get('/api/wiki/search?q=research').json()==[]
+
+
+def test_question_in_article_box_routes_to_read_query(tmp_path):
+    from app.main import create_app
+    from app.schemas import Decision
+
+    class ChineseQuestionModel(FakeModel):
+        async def decide(self, instruction, summary):
+            if '最高频' in instruction:
+                return Decision(intent='top', limit=1)
+            return await super().decide(instruction, summary)
+
+    with TestClient(create_app(Settings(database_path=tmp_path/'question.sqlite3',dictionary_enabled=False), model=ChineseQuestionModel())) as client:
+        client.app.state.repo.upsert_entries([{'word':'debug','count':4}], 'seed')
+        events = parse_sse(client.post('/api/agent/stream', json={
+            'user_input':'Import the vocabulary in this article',
+            'text':'当前最高频的词语是哪一个',
+            'thread_id':'question',
+        }).text)
+        assert events[-1][0] == 'final'
+        assert events[-1][1]['intent'] == 'top'
+        assert events[-1][1]['highlights']['items'] == [{'word':'debug','total_count':4,'rank':1}]
