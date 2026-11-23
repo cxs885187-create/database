@@ -28,6 +28,7 @@ async function api(path, method = 'GET', data) {
 function activate(tab) {
   document.querySelectorAll('.tab').forEach(node => { node.hidden = node.id !== tab; });
   document.querySelectorAll('nav button').forEach(node => node.setAttribute('aria-pressed', String(node.dataset.tab === tab)));
+  if (tab === 'wiki' && !document.querySelector('#vocabulary-rows tr')) loadVocabulary();
 }
 document.querySelectorAll('nav button').forEach(button => button.onclick = async () => {
   activate(button.dataset.tab);
@@ -122,12 +123,39 @@ function showResult(result) {
 $('search-form').onsubmit = async event => {
   event.preventDefault();
   try {
-    const results = await api('/api/wiki/search?q=' + encodeURIComponent($('query').value));
-    $('search-results').replaceChildren();
-    if (!results.length) element('p', 'No matches.', $('search-results'));
-    results.forEach(result => action(result.word, () => detail(result.word_id), $('search-results')));
+    const query = $('query').value.trim();
+    if (!query) return loadVocabulary();
+    const results = await api('/api/wiki/search?q=' + encodeURIComponent(query) + '&limit=100');
+    const ids = new Set(results.map(result => result.word_id));
+    const all = await api('/api/words/all');
+    renderVocabulary(all.filter(word => ids.has(word.id)), `Showing ${ids.size} matching words`);
   } catch (error) { $('notice').textContent = error.message; }
 };
+$('clear-search').onclick = () => { $('query').value = ''; loadVocabulary().catch(error => { $('notice').textContent = error.message; }); };
+async function loadVocabulary() {
+  const all = await api('/api/words/all');
+  renderVocabulary(all, `Showing all ${all.length} words`);
+}
+function renderVocabulary(words, meta) {
+  const body = $('vocabulary-rows');
+  body.replaceChildren();
+  $('table-meta').textContent = meta;
+  if (!words.length) {
+    const row = element('tr', undefined, body);
+    const cell = element('td', 'No words match this filter.', row); cell.colSpan = 7; cell.className = 'empty-cell';
+    return;
+  }
+  words.forEach(word => {
+    const row = element('tr', undefined, body);
+    const wordCell = element('td', undefined, row); action(word.word, () => detail(word.id), wordCell).className = 'word-link';
+    element('td', Array.isArray(word.part_of_speech) ? word.part_of_speech.join(', ') : (word.part_of_speech || '—'), row);
+    element('td', word.definition_en || '—', row);
+    element('td', word.definition_zh || '—', row);
+    element('td', String(word.total_count ?? 0), row);
+    element('td', word.difficulty || '—', row);
+    element('td', word.last_seen_at ? new Date(word.last_seen_at).toLocaleDateString() : '—', row);
+  });
+}
 async function detail(id) {
   const data = await api('/api/words/' + id);
   const parent = $('detail'); parent.replaceChildren();

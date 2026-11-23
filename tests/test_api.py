@@ -45,6 +45,10 @@ def test_api_ingestion_mcp_scope_and_learning_contract(tmp_path):
         assert client.get('/api/logs/'+final['log_id']).json()['traces']
         matches = client.get('/api/wiki/search',params={'q':'research'}).json()
         assert matches
+        all_words = client.get('/api/words/all').json()
+        assert all_words
+        assert {'word', 'part_of_speech', 'definition_en', 'total_count', 'last_seen_at'} <= set(all_words[0])
+        assert client.get('/api/words/all?limit=1').status_code == 200
         word_id = matches[0]['word_id']
         assert client.post('/api/wiki/notes',json={'word_id':word_id,'title':'Notes','body_md':'Related to [[system]].'}).status_code==201
         assert client.get('/api/words/'+str(word_id)).json()['notes']

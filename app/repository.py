@@ -120,6 +120,17 @@ class VocabularyRepository:
                 rows = conn.execute('SELECT w.word,SUM(o.count) AS total_count FROM words w JOIN occurrences o ON w.id=o.word_id WHERE o.occurred_at>=? GROUP BY w.id ORDER BY total_count DESC,w.word LIMIT ?',(stamp(utcnow()-timedelta(days=int(window[:-1]))),limit)).fetchall()
         return [{**dict(row),'rank':i+1} for i,row in enumerate(rows)]
 
+    def list_words(self, limit=1000):
+        """Return the complete reader-facing vocabulary rows, ordered for scanning."""
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """SELECT id, word, part_of_speech, definition_en, definition_zh,
+                          total_count, difficulty, last_seen_at
+                   FROM words ORDER BY lower(word), id LIMIT ?""",
+                (max(1, min(int(limit), 1000)),),
+            ).fetchall()
+        return [decode(row) for row in rows]
+
     def search(self,query,limit=20):
         terms = re.findall(r"[\w'-]+",query)
         if not terms:

@@ -82,6 +82,10 @@ def create_app(settings=None,model=None):
     def words(limit: int = Query(default=20,ge=1,le=100),window: str = 'all'):
         return app.state.repo.top(limit,window)
 
+    @app.get('/api/words/all')
+    def all_words(limit: int = Query(default=1000,ge=1,le=1000)):
+        return app.state.repo.list_words(limit)
+
     @app.get('/api/words/{word_id}')
     def word_detail(word_id: int):
         detail = app.state.repo.word_detail(word_id)
