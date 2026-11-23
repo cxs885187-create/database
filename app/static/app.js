@@ -114,11 +114,59 @@ function showResult(result) {
   $('scope').replaceChildren();
   $('agent-progress').textContent = 'Completed';
   const target = $('result'); target.replaceChildren();
-  element('p', result.summary, target);
-  if (result.stats) element('pre', JSON.stringify(result.stats, null, 2), target);
-  element('pre', JSON.stringify(result.highlights, null, 2), target);
-  if (result.warnings.length) element('p', `Warnings: ${result.warnings.map(w => `${w.word || ''} ${w.reason}`).join('; ')}`, target);
+  const summary = element('p', result.summary, target); summary.className = 'result-summary';
+  renderResultStats(result.stats, target);
+  renderResultHighlights(result.highlights || {}, target);
+  if (result.warnings.length) {
+    const warning = element('p', undefined, target); warning.className = 'result-warning';
+    warning.textContent = `Warnings: ${result.warnings.map(w => `${w.word || ''} ${w.reason}`).join('; ')}`;
+  }
   action('View log', async () => { activate('logs'); await loadLog(result.log_id); }, target);
+}
+function renderResultStats(stats, parent) {
+  if (!stats) return;
+  const grid = element('div', undefined, parent); grid.className = 'result-stats';
+  [['Imported', stats.write_success], ['New', stats.new_words], ['Updated', stats.updated_words], ['Retries skipped', stats.duplicates], ['Filtered out', stats.skipped]].forEach(([label, value]) => {
+    const card = element('div', undefined, grid); card.className = 'stat-card';
+    element('strong', String(value ?? 0), card); element('span', label, card);
+  });
+}
+function renderResultHighlights(highlights, parent) {
+  const items = Array.isArray(highlights.items) ? highlights.items : [];
+  if (items.length) {
+    element('h3', 'Top vocabulary', parent);
+    const wrap = element('div', undefined, parent); wrap.className = 'result-table-wrap';
+    const table = element('table', undefined, wrap); table.className = 'result-table';
+    const head = element('thead', undefined, table); const headRow = element('tr', undefined, head);
+    ['Rank', 'Word', 'Occurrences'].forEach(label => element('th', label, headRow));
+    const body = element('tbody', undefined, table);
+    items.forEach(item => {
+      const row = element('tr', undefined, body);
+      element('td', String(item.rank ?? ''), row);
+      const wordCell = element('td', undefined, row); action(item.word, () => detail(item.word_id), wordCell).className = 'word-link';
+      element('td', String(item.total_count ?? item.count ?? 0), row);
+    });
+  }
+  const newEntries = Array.isArray(highlights.new_entries) ? highlights.new_entries : [];
+  const updatedEntries = Array.isArray(highlights.updated_entries) ? highlights.updated_entries : [];
+  if (newEntries.length) renderEntryList('New entries', newEntries, parent);
+  if (updatedEntries.length) renderEntryList('Updated entries', updatedEntries, parent);
+  if (highlights.applied_filter && !items.length) {
+    const filter = highlights.applied_filter;
+    const details = [];
+    if (filter.top_n) details.push(`top ${filter.top_n}`);
+    if (filter.exclude_existing) details.push('new words only');
+    if (filter.min_occurrences > 1) details.push(`at least ${filter.min_occurrences} occurrences`);
+    if (details.length) element('p', `Filter applied: ${details.join(', ')}.`, parent);
+  }
+}
+function renderEntryList(title, entries, parent) {
+  element('h3', title, parent);
+  const list = element('ul', undefined, parent); list.className = 'result-list';
+  entries.forEach(entry => {
+    const label = entry.count_before !== undefined ? `${entry.word} (${entry.count_before} -> ${entry.count_after})` : `${entry.word} (${entry.count ?? 0})`;
+    element('li', label, list);
+  });
 }
 $('search-form').onsubmit = async event => {
   event.preventDefault();
