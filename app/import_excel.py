@@ -5,9 +5,10 @@ from pathlib import Path
 import openpyxl
 from .config import Settings
 from .db import Database
+from .glossary import import_glossary_translations
 from .repository import VocabularyRepository
 
-def import_workbook(repository,path):
+def import_workbook(repository,path, import_translations=True):
     path = Path(path)
     workbook = openpyxl.load_workbook(path,read_only=True,data_only=True)
     try:
@@ -29,7 +30,10 @@ def import_workbook(repository,path):
             values['usage_contexts']=['Imported from historical Excel vocabulary']
             entries.append(values)
         source_id = 'excel_'+hashlib.sha256(path.read_bytes()).hexdigest()[:32]
-        return repository.upsert_entries(entries,source_id)
+        result = repository.upsert_entries(entries,source_id)
+        if import_translations:
+            result['translations'] = import_glossary_translations(repository)
+        return result
     finally:
         workbook.close()
 

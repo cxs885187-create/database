@@ -110,6 +110,19 @@ class VocabularyRepository:
             self._sync_fts(conn,word_id)
         return self.word_detail(word_id)
 
+    def update_translations(self, translations):
+        """Fill missing Chinese meanings and refresh FTS without changing counts."""
+        changed = 0
+        with self.db.transaction() as conn:
+            for word, translation in translations.items():
+                row = conn.execute('SELECT id, definition_zh FROM words WHERE lower(word)=?', (word.lower(),)).fetchone()
+                if not row or row['definition_zh']:
+                    continue
+                conn.execute('UPDATE words SET definition_zh=? WHERE id=?', (translation, row['id']))
+                self._sync_fts(conn, row['id'])
+                changed += 1
+        return changed
+
     def top(self,limit=20,window='all'):
         if window not in {'all','7d','30d'}:
             raise ValueError('Invalid ranking window')

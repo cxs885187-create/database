@@ -42,7 +42,7 @@ All six question types are present: `en_to_zh`, `zh_to_en`, `audio_to_zh`, `cloz
 
 Questions have private stored answers, opaque IDs, expiry, and persisted results. The answer endpoint accepts the question ID and actual answer and grades correctness on the server. This strengthens the original client-provided `is_correct` contract. Retries return the prior result without a second schedule update. Daily new-word introductions respect the quota; daily statistics currently use UTC day boundaries.
 
-Free Dictionary API provides English definitions, IPA and optional audio. Translation-dependent questions require user-supplied Chinese meanings, and exam filters require verified difficulty labels. The system never fabricates missing metadata or silently treats a missing question as completed.
+Free Dictionary API provides English definitions, IPA and optional audio. The supplied glossary importer provides Chinese meanings for its known terms; words outside that source still require user-supplied translations. Exam filters require verified difficulty labels. The system never fabricates missing metadata or silently treats a missing question as completed.
 
 ## Operating boundary
 

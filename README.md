@@ -50,7 +50,15 @@ The system Agent uses LangChain against DeepSeek's OpenAI-compatible chat API. I
 .venv\Scripts\python.exe -m app.import_excel "version control/v0.3/v0.3.xlsx"
 ```
 
-This imports the 30 v0.3 records, English definitions, examples, and topics. Excel has no encounter counts, so each imported record starts with one encounter. A file-content-based source ID prevents the same workbook from incrementing counts on retry. The original workbook is read without being changed. A changed workbook counts as a distinct source.
+This imports the 30 v0.3 records, English definitions, examples, topics, and the matching Chinese meanings from the supplied glossary. Excel has no encounter counts, so each imported record starts with one encounter. A file-content-based source ID prevents the same workbook from incrementing counts on retry. The original workbook is read without being changed. A changed workbook counts as a distinct source.
+
+To refresh only the Chinese meanings in an existing database:
+
+```powershell
+.venv\Scripts\python.exe -m app.import_glossary
+```
+
+This fills only currently empty translations and does not change occurrence counts. `Difficulty` is a separate verified metadata field; the glossary does not provide exam-level labels, so it remains empty until labels are assigned explicitly.
 
 ## Use the system
 
