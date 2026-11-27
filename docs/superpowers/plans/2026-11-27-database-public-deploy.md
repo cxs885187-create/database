@@ -15,6 +15,7 @@
 - Modify `app/config.py`: add optional credentials and trusted hosts; preserve current defaults.
 - Modify `app/main.py`: enforce Basic Auth before every route, static file, or docs response when credentials are configured.
 - Modify `.env.example`: document the optional production settings without adding real credentials.
+- Modify `requirements.lock.txt`: mark the Windows-only `pywin32` package with a platform marker so Ubuntu pip skips it.
 - Modify `README.md`: document public deployment configuration and HTTP demo limitation.
 - Create `deploy/vocabulary.service`: the systemd unit for the server instance.
 - Create `docs/superpowers/specs/2026-11-27-database-server-deployment-design.md`: approved design.
@@ -152,7 +153,7 @@ The server demo keeps its SQLite database at `/srv/database/data/vocabulary.sqli
 - [ ] Use this explicit staging command so unrelated generated files and the edited historical workbook remain unstaged:
 
 ```powershell
-git add -- README.md .env.example app/agent.py app/config.py app/db.py app/deepseek.py app/dictionary.py app/fill_translations.py app/learning.py app/main.py app/mcp_server.py app/repository.py app/schemas.py app/translate.py app/static/app.js app/static/index.html app/static/styles.css docs/system-design.md docs/superpowers/specs/2026-11-27-database-server-deployment-design.md docs/superpowers/plans/2026-11-27-database-public-deploy.md tests/test_api.py tests/test_learning.py scripts/start_server.py deploy/vocabulary.service
+git add -- README.md .env.example requirements.lock.txt app/agent.py app/config.py app/db.py app/deepseek.py app/dictionary.py app/fill_translations.py app/learning.py app/main.py app/mcp_server.py app/repository.py app/schemas.py app/translate.py app/static/app.js app/static/index.html app/static/styles.css docs/system-design.md docs/superpowers/specs/2026-11-27-database-server-deployment-design.md docs/superpowers/plans/2026-11-27-database-public-deploy.md tests/test_api.py tests/test_learning.py scripts/start_server.py deploy/vocabulary.service
 ```
 
 - [ ] Run `git diff --cached --check`; commit as `feat: deploy vocabulary app with protected public access`.
@@ -206,6 +207,25 @@ git archive --format=zip --output=tmp/database-deploy.zip HEAD
 $demoPassword = & .\.venv\Scripts\python.exe -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))"
 ```
 
+- [ ] Package the installed spaCy model and its metadata as a portable wheel because GitHub model downloads from the server are stalled:
+
+```powershell
+@'
+from pathlib import Path
+import zipfile
+base = Path('.venv/Lib/site-packages')
+roots = [base / 'en_core_web_sm', base / 'en_core_web_sm-3.8.0.dist-info']
+out = Path('tmp/en_core_web_sm-3.8.0-py3-none-any.whl')
+with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+    for root in roots:
+        if not root.exists():
+            raise SystemExit(f'missing model path: {root.name}')
+        for path in root.rglob('*'):
+            if path.is_file():
+                archive.write(path, path.relative_to(base).as_posix())
+'@ | & .\.venv\Scripts\python.exe -
+```
+
 ## Task 6: Install on the server
 
 **Target:** `/srv/database/app` and `/srv/database/data` on `txy`.
@@ -239,10 +259,11 @@ ssh txy "python3 -m zipfile -e /tmp/database-deploy.zip /srv/database/app && chm
 ```
 
 - [ ] Set the server `.env` to owner `ubuntu`, group `ubuntu`, mode `0600`; set the SQLite database and containing data directory to owner `ubuntu` and restrictive permissions.
-- [ ] Create a Python 3.12 virtual environment, install the locked requirements, and install the spaCy model:
+- [ ] Create a Python 3.12 virtual environment, install the locked dependencies except the GitHub-hosted spaCy model, then install the local model wheel:
 
 ```powershell
-ssh txy "cd /srv/database/app && python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.lock.txt && .venv/bin/python -m spacy download en_core_web_sm"
+scp tmp/en_core_web_sm-3.8.0-py3-none-any.whl txy:/tmp/en_core_web_sm-3.8.0-py3-none-any.whl
+ssh txy "set -e; python3 -m venv /srv/database/app/.venv; grep -v '^en_core_web_sm @' /srv/database/app/requirements.lock.txt > /tmp/vocabulary-requirements.txt; cd /srv/database/app; .venv/bin/python -m pip install -r /tmp/vocabulary-requirements.txt; .venv/bin/python -m pip install /tmp/en_core_web_sm-3.8.0-py3-none-any.whl; .venv/bin/python -c 'import spacy; nlp=spacy.load(\"en_core_web_sm\"); print(\"spacy-model\",nlp.meta[\"version\"])'"
 ```
 
 - [ ] Install `deploy/vocabulary.service` as `/etc/systemd/system/vocabulary.service`; run `systemctl daemon-reload` and enable/start only `vocabulary.service`.
