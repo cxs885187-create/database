@@ -18,6 +18,9 @@ class Settings:
     dictionary_enabled: bool = True
     daily_new_limit: int = 10
     session_ttl_seconds: int = 1800
+    app_username: str = ''
+    app_password: str = field(default='', repr=False)
+    allowed_hosts: tuple[str, ...] = ('127.0.0.1', 'localhost', '[::1]', 'testserver')
 
     @property
     def deepseek_model(self):
@@ -26,6 +29,15 @@ class Settings:
     @classmethod
     def from_env(cls):
         load_dotenv(ROOT / '.env', override=False)
+        app_username = os.getenv('APP_USERNAME', '')
+        app_password = os.getenv('APP_PASSWORD', '')
+        if bool(app_username) != bool(app_password):
+            raise ValueError('APP_USERNAME and APP_PASSWORD must both be set or both be empty')
+        allowed_hosts = tuple(host.strip() for host in os.getenv(
+            'ALLOWED_HOSTS', '127.0.0.1,localhost,[::1],testserver'
+        ).split(',') if host.strip())
+        if not allowed_hosts:
+            raise ValueError('ALLOWED_HOSTS must contain at least one host')
         return cls(
             database_path=Path(os.getenv('DATABASE_PATH', str(ROOT / 'data' / 'vocabulary.sqlite3'))).resolve(),
             deepseek_api_key=os.getenv('DEEPSEEK_API_KEY', ''),
@@ -36,4 +48,7 @@ class Settings:
             dictionary_enabled=os.getenv('DICTIONARY_ENABLED', 'true').lower() in {'true','1','yes'},
             daily_new_limit=int(os.getenv('DAILY_NEW_LIMIT','10')),
             session_ttl_seconds=int(os.getenv('SESSION_TTL_SECONDS','1800')),
+            app_username=app_username,
+            app_password=app_password,
+            allowed_hosts=allowed_hosts,
         )

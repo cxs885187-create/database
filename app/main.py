@@ -1,5 +1,8 @@
 """Local FastAPI server. Wiki and learning never depend on a model call."""
 import asyncio
+import base64
+import binascii
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -37,7 +40,7 @@ def create_app(settings=None,model=None):
             await gateway.close()
 
     app = FastAPI(title='Personal Vocabulary Management',version='1.0.0',lifespan=lifespan)
-    app.add_middleware(TrustedHostMiddleware,allowed_hosts=['127.0.0.1','localhost','[::1]','testserver'])
+    app.add_middleware(TrustedHostMiddleware,allowed_hosts=settings.allowed_hosts)
 
     @app.exception_handler(KeyError)
     async def missing(request,exc):
@@ -46,6 +49,35 @@ def create_app(settings=None,model=None):
     @app.exception_handler(ValueError)
     async def invalid(request,exc):
         return JSONResponse(status_code=422,content={'detail':str(exc)})
+
+    @app.middleware('http')
+    async def basic_auth(request,call_next):
+        if settings.app_username and settings.app_password:
+            authorization = request.headers.get('authorization', '')
+            scheme, separator, encoded_credentials = authorization.partition(' ')
+            credentials = None
+            if separator and scheme.lower() == 'basic' and encoded_credentials:
+                try:
+                    credentials = base64.b64decode(encoded_credentials, validate=True).decode('utf-8')
+                except (binascii.Error, UnicodeDecodeError, ValueError):
+                    pass
+            if credentials is not None:
+                username, separator, password = credentials.partition(':')
+                if separator:
+                    username_matches = secrets.compare_digest(
+                        username.encode('utf-8'), settings.app_username.encode('utf-8')
+                    )
+                    password_matches = secrets.compare_digest(
+                        password.encode('utf-8'), settings.app_password.encode('utf-8')
+                    )
+                    if username_matches and password_matches:
+                        return await call_next(request)
+            return JSONResponse(
+                status_code=401,
+                content={'detail':'Authentication required'},
+                headers={'WWW-Authenticate':'Basic realm="Vocabulary"'},
+            )
+        return await call_next(request)
 
     @app.middleware('http')
     async def local_boundary(request,call_next):
