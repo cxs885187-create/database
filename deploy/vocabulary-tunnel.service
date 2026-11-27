@@ -1,0 +1,19 @@
+[Unit]
+Description=Public HTTPS tunnel for Personal Vocabulary Database
+After=network-online.target vocabulary.service
+Wants=network-online.target
+Requires=vocabulary.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8088
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

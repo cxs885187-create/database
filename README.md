@@ -47,7 +47,7 @@ The system Agent uses LangChain against DeepSeek's OpenAI-compatible chat API. I
 
 ## Server demo
 
-The server demo keeps its SQLite database at `/srv/database/data/vocabulary.sqlite3`. Its server-only `.env` sets `DATABASE_PATH`, `APP_USERNAME`, `APP_PASSWORD`, and `ALLOWED_HOSTS=82.156.102.68`. Keep the `.env` private and out of Git. The public demo uses HTTP on port 8088; its generated password is for this demo only because HTTP does not encrypt credentials or traffic.
+The server demo keeps its SQLite database at `/srv/database/data/vocabulary.sqlite3`. Its server-only `.env` sets `DATABASE_PATH`, `APP_USERNAME`, `APP_PASSWORD`, and `ALLOWED_HOSTS=82.156.102.68,*.trycloudflare.com`. Keep the `.env` private and out of Git. Uvicorn listens only on loopback port 8088, and a separate Cloudflare Quick Tunnel provides the public HTTPS URL. The generated password is for this demo only.
 
 ## Import the existing Excel vocabulary
 

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** Use the `superpowers:executing-plans` workflow to carry out this plan inline. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deploy the current vocabulary database app and existing SQLite data to `82.156.102.68` on HTTP port 8088, with password protection and persistent server-disk storage, without changing GitHub `master` or HippoArk.
+**Goal:** Deploy the current vocabulary database app and existing SQLite data to `82.156.102.68`, with password protection, persistent server-disk storage, and a public HTTPS URL, without changing GitHub `master` or HippoArk.
 
-**Architecture:** Add opt-in application-wide HTTP Basic Auth and an environment-configurable trusted-host list. Run the app as `ubuntu` under systemd on port 8088, store SQLite at `/srv/database/data/vocabulary.sqlite3`, and open only that port through UFW. Push the reviewed application version to a new `codex/` branch, never to `master`.
+**Architecture:** Add opt-in application-wide HTTP Basic Auth and an environment-configurable trusted-host list. Run the app as `ubuntu` under systemd on loopback port 8088, store SQLite at `/srv/database/data/vocabulary.sqlite3`, and expose it through a separate Cloudflare Quick Tunnel systemd service. Push the reviewed application version to a new `codex/` branch, never to `master`.
 
 **Tech Stack:** FastAPI, Uvicorn, SQLite, Python 3.12, systemd, UFW, Git, SSH/SCP.
 
@@ -18,6 +18,7 @@
 - Modify `requirements.lock.txt`: mark the Windows-only `pywin32` package with a platform marker so Ubuntu pip skips it.
 - Modify `README.md`: document public deployment configuration and HTTP demo limitation.
 - Create `deploy/vocabulary.service`: the systemd unit for the server instance.
+- Create `deploy/vocabulary-tunnel.service`: the independent Cloudflare Quick Tunnel service.
 - Create `docs/superpowers/specs/2026-11-27-database-server-deployment-design.md`: approved design.
 - Create `docs/superpowers/plans/2026-11-27-database-public-deploy.md`: this plan.
 - Package the relevant current app changes, including `app/translate.py`, `app/fill_translations.py`, and `scripts/start_server.py`, while excluding local secrets, databases, generated workbooks, temporary outputs, and `node_modules`.
@@ -121,9 +122,33 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/srv/database/app
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/srv/database/app/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8088
+ExecStart=/srv/database/app/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8088
 Restart=on-failure
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+- [ ] Create `deploy/vocabulary-tunnel.service` with this content:
+
+```ini
+[Unit]
+Description=Public HTTPS tunnel for Personal Vocabulary Database
+After=network-online.target vocabulary.service
+Wants=network-online.target
+Requires=vocabulary.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8088
+Restart=on-failure
+RestartSec=10
 NoNewPrivileges=true
 PrivateTmp=true
 
@@ -136,7 +161,7 @@ WantedBy=multi-user.target
 ```markdown
 ## Server demo
 
-The server demo keeps its SQLite database at `/srv/database/data/vocabulary.sqlite3`. Its server-only `.env` sets `DATABASE_PATH`, `APP_USERNAME`, `APP_PASSWORD`, and `ALLOWED_HOSTS=82.156.102.68`. Keep the `.env` private and out of Git. The public demo uses HTTP on port 8088; its generated password is for this demo only because HTTP does not encrypt credentials or traffic.
+The server demo keeps its SQLite database at `/srv/database/data/vocabulary.sqlite3`. Its server-only `.env` sets `DATABASE_PATH`, `APP_USERNAME`, `APP_PASSWORD`, and `ALLOWED_HOSTS=82.156.102.68,*.trycloudflare.com`. Keep the `.env` private and out of Git. Uvicorn listens only on loopback port 8088, and a separate Cloudflare Quick Tunnel provides the public HTTPS URL. The generated password is for this demo only.
 ```
 
 - [ ] Ensure the README does not contain the real key or generated password.
@@ -153,7 +178,7 @@ The server demo keeps its SQLite database at `/srv/database/data/vocabulary.sqli
 - [ ] Use this explicit staging command so unrelated generated files and the edited historical workbook remain unstaged:
 
 ```powershell
-git add -- README.md .env.example requirements.lock.txt app/agent.py app/config.py app/db.py app/deepseek.py app/dictionary.py app/fill_translations.py app/learning.py app/main.py app/mcp_server.py app/repository.py app/schemas.py app/translate.py app/static/app.js app/static/index.html app/static/styles.css docs/system-design.md docs/superpowers/specs/2026-11-27-database-server-deployment-design.md docs/superpowers/plans/2026-11-27-database-public-deploy.md tests/test_api.py tests/test_learning.py scripts/start_server.py deploy/vocabulary.service
+git add -- README.md .env.example requirements.lock.txt app/agent.py app/config.py app/db.py app/deepseek.py app/dictionary.py app/fill_translations.py app/learning.py app/main.py app/mcp_server.py app/repository.py app/schemas.py app/translate.py app/static/app.js app/static/index.html app/static/styles.css docs/system-design.md docs/superpowers/specs/2026-11-27-database-server-deployment-design.md docs/superpowers/plans/2026-11-27-database-public-deploy.md tests/test_api.py tests/test_learning.py scripts/start_server.py deploy/vocabulary.service deploy/vocabulary-tunnel.service
 ```
 
 - [ ] Run `git diff --cached --check`; commit as `feat: deploy vocabulary app with protected public access`.
@@ -246,7 +271,7 @@ $serverEnv = @(Get-Content -LiteralPath .env | Where-Object { $_ -notmatch '^\s*
 $serverEnv += 'DATABASE_PATH=/srv/database/data/vocabulary.sqlite3'
 $serverEnv += 'APP_USERNAME=demo'
 $serverEnv += "APP_PASSWORD=$demoPassword"
-$serverEnv += 'ALLOWED_HOSTS=82.156.102.68'
+$serverEnv += 'ALLOWED_HOSTS=82.156.102.68,*.trycloudflare.com'
 $serverEnv | ssh txy "umask 077; cat > /srv/database/app/.env; chmod 600 /srv/database/app/.env"
 ```
 
@@ -266,27 +291,32 @@ scp tmp/en_core_web_sm-3.8.0-py3-none-any.whl txy:/tmp/en_core_web_sm-3.8.0-py3-
 ssh txy "set -e; python3 -m venv /srv/database/app/.venv; grep -v '^en_core_web_sm @' /srv/database/app/requirements.lock.txt > /tmp/vocabulary-requirements.txt; cd /srv/database/app; .venv/bin/python -m pip install -r /tmp/vocabulary-requirements.txt; .venv/bin/python -m pip install /tmp/en_core_web_sm-3.8.0-py3-none-any.whl; .venv/bin/python -c 'import spacy; nlp=spacy.load(\"en_core_web_sm\"); print(\"spacy-model\",nlp.meta[\"version\"])'"
 ```
 
-- [ ] Install `deploy/vocabulary.service` as `/etc/systemd/system/vocabulary.service`; run `systemctl daemon-reload` and enable/start only `vocabulary.service`.
-- [ ] Install and start only the new service:
+- [ ] Install both unit files, start `vocabulary.service`, and start the independent tunnel service:
 
 ```powershell
-ssh txy "sudo -n install -o root -g root -m 644 /srv/database/app/deploy/vocabulary.service /etc/systemd/system/vocabulary.service && sudo -n systemctl daemon-reload && sudo -n systemctl enable --now vocabulary.service"
+ssh txy "sudo -n install -o root -g root -m 644 /srv/database/app/deploy/vocabulary.service /etc/systemd/system/vocabulary.service && sudo -n install -o root -g root -m 644 /srv/database/app/deploy/vocabulary-tunnel.service /etc/systemd/system/vocabulary-tunnel.service && sudo -n systemctl daemon-reload && sudo -n systemctl enable --now vocabulary.service && sudo -n systemctl enable --now vocabulary-tunnel.service"
 ```
 
-- [ ] Allow `8088/tcp` through UFW. Do not edit Nginx config, stop other services, or touch HippoArk.
-- [ ] Add only the new port to UFW:
+- [ ] Remove the temporary `8088/tcp` UFW rule from the direct-access attempt; do not edit Nginx config, stop other services, or touch HippoArk.
 
 ```powershell
-ssh txy "sudo -n ufw allow 8088/tcp comment 'Vocabulary demo HTTP'"
+ssh txy "sudo -n ufw --force delete allow 8088/tcp; sudo -n ufw status numbered"
 ```
-- [ ] Inspect `systemctl status vocabulary.service`, `ss -ltnp`, and `free -h`; if available memory remains healthy, leave Vibe-Trading and Neuromesh running.
+- [ ] Inspect `systemctl status vocabulary.service vocabulary-tunnel.service`, `ss -ltnp`, and `free -h`; confirm port 8088 listens only on `127.0.0.1`. If available memory remains healthy, leave Vibe-Trading and Neuromesh running.
 
 ## Task 7: Verify the public site
 
-- [ ] From PowerShell, confirm the site challenges unauthenticated users, then request the protected health and word count endpoints with the generated credentials. Print only status and counts:
+- [ ] Read the current public HTTPS URL from the dedicated tunnel journal:
 
 ```powershell
-$baseUrl = 'http://82.156.102.68:8088'
+$publicUrl = (ssh txy "sudo -n journalctl -u vocabulary-tunnel.service --no-pager | grep -oE 'https://[[:alnum:].-]+trycloudflare.com' | tail -1").Trim()
+$publicUrl
+```
+
+- [ ] From PowerShell, confirm the tunnel challenges unauthenticated users, then request the protected health and word count endpoints with the generated credentials. Assign the URL returned by the preceding command to `$baseUrl` and print only status and counts:
+
+```powershell
+$baseUrl = $publicUrl
 try { (Invoke-WebRequest "$baseUrl/" -TimeoutSec 20).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }
 $pair = [Text.Encoding]::ASCII.GetBytes("demo:$demoPassword")
 $headers = @{ Authorization = 'Basic ' + [Convert]::ToBase64String($pair) }
@@ -298,7 +328,7 @@ $rows = Invoke-RestMethod "$baseUrl/api/words/all?limit=1000" -Headers $headers 
 
 - [ ] Confirm `/api/health` returns `ok`, the word endpoint returns 79 entries, and the HTTP response does not contain the model key.
 - [ ] Verify the server-side SQLite file exists at `/srv/database/data/vocabulary.sqlite3` and contains 79 words.
-- [ ] If port 8088 is blocked outside despite the UFW rule, stop only `vocabulary.service`, bind it to loopback, and start an independent Cloudflare Quick Tunnel to it. Do not alter HippoArk's tunnel or listeners.
+- [ ] Confirm the URL is reachable from outside the server and write down the current Quick Tunnel URL. It may change after the tunnel process restarts.
 - [ ] Report the working public URL, the generated username/password, the new branch URL if pushed, and whether existing services remained running.
 
 ## Scope and verification notes

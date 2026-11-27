@@ -14,8 +14,8 @@ Deploy the current vocabulary database application to `82.156.102.68` and make i
 
 ## Approaches considered
 
-1. **Direct HTTP on a dedicated port (selected).** Run the app on port 8088, protect it with HTTP Basic authentication, and allow that port through the host firewall. This gives a stable IP URL with the fewest moving parts. HTTP does not encrypt credentials or application traffic, so use a generated demo-only password.
-2. **Cloudflare Quick Tunnel with HTTPS.** No inbound port or domain is needed and browser traffic is encrypted, but the URL is randomly assigned and may change after the tunnel restarts. The user selected plain HTTP for this demo.
+1. **Direct HTTP on a dedicated port.** Run the app on port 8088 with HTTP Basic authentication and allow that port through the host firewall. This would give a stable IP URL, but a direct connection to `82.156.102.68:8088` timed out because the cloud firewall did not expose the port.
+2. **Cloudflare Quick Tunnel with HTTPS (selected fallback).** Keep Uvicorn on loopback port 8088 and run an independent Quick Tunnel systemd service. This avoids changing the cloud firewall or Nginx and provides HTTPS without a domain. The generated URL is stable while the tunnel process runs and may change after a restart.
 3. **A custom domain with HTTPS.** This offers a stable, trusted URL but requires a domain and DNS configuration that were not supplied.
 
 ## Design
@@ -25,16 +25,16 @@ Deploy the current vocabulary database application to `82.156.102.68` and make i
 - Add optional `APP_USERNAME`, `APP_PASSWORD`, and `ALLOWED_HOSTS` settings. When username and password are configured, an application-wide HTTP Basic Auth middleware protects the index, static assets, API routes, and documentation. Local development remains unchanged when both credentials are unset.
 - Reject startup configuration where only one of username/password is set. Compare submitted credentials with constant-time comparison and return a Basic Auth challenge for missing or incorrect credentials.
 - Reject `:` in usernames because HTTP Basic uses it to separate username from password. Enforce credential invariants even when `Settings` is constructed directly, not only when loaded from `.env`.
-- Keep the existing local host allowlist as the default. The server environment adds `82.156.102.68` for the public deployment.
-- Keep the existing same-origin write check. The browser's origin and host are the same public IP and port, so application writes continue to work.
+- Keep the existing local host allowlist as the default. The server environment adds `82.156.102.68` and `*.trycloudflare.com` for the public deployment and tunnel.
+- Keep the existing same-origin write check. The tunnel forwards the public HTTPS host and scheme to Uvicorn, so the browser origin and app base URL match for writes.
 
 ### Server runtime and persistent files
 
 - Install the current working-copy application under `/srv/database/app` and run it as the `ubuntu` user through a dedicated systemd unit.
-- Bind Uvicorn to `0.0.0.0:8088`; do not add an Nginx site or alter existing services.
+- Bind Uvicorn to `127.0.0.1:8088`; run a separate `vocabulary-tunnel.service` using the existing `cloudflared` executable to expose it over HTTPS. Do not add an Nginx site or alter the existing HippoArk tunnel.
 - Store the SQLite database at `/srv/database/data/vocabulary.sqlite3`. Copy a consistent SQLite backup of the local database before first startup. The app continues writing its operational logs under its server-side application directory.
 - Copy the local `.env` to the server with owner-only permissions, then change only its server copy's `DATABASE_PATH` and add generated demo login settings and the public host. Never include `.env` in Git or the deployment commit.
-- Allow only TCP port 8088 through UFW. If the cloud firewall blocks that port, use an isolated Cloudflare Quick Tunnel as a fallback without modifying the HippoArk tunnel.
+- Do not leave an inbound UFW rule for 8088; public ingress is outbound through Cloudflare. Remove the temporary 8088 rule added during the direct-connect attempt.
 
 ### Git and scope
 
@@ -46,7 +46,7 @@ Deploy the current vocabulary database application to `82.156.102.68` and make i
 
 - Validate the production environment file and verify the SQLite backup before starting the systemd service.
 - If the app fails to start, read only its dedicated journal/logs, fix the deployment issue, and restart only the new database service.
-- If port 8088 is inaccessible externally despite the host firewall rule, keep the app service on loopback and use a separate Cloudflare Quick Tunnel service rather than changing existing listeners.
+- If the Quick Tunnel restarts, its generated hostname may change; obtain the current hostname from its dedicated systemd journal.
 - Preserve the existing server database on subsequent deployments; never replace it with the local copy after initial deployment.
 
 ## Verification
