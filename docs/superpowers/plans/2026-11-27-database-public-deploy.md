@@ -1,6 +1,6 @@
 # Database Public Deployment Implementation Plan
 
-> **For agentic workers:** Use the `superpowers:executing-plans` workflow to carry out this plan inline. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Use the `superpowers:executing-plans` workflow to carry out this plan inline. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Deploy the current vocabulary database app and existing SQLite data to `82.156.102.68`, with password protection, persistent server-disk storage, and a public HTTPS URL, without changing GitHub `master` or HippoArk.
 
@@ -27,8 +27,8 @@
 
 **Files:** `app/config.py`, `.env.example`
 
-- [ ] Add `app_username: str = ''`, `app_password: str = field(default='', repr=False)`, and `allowed_hosts: tuple[str, ...] = ('127.0.0.1', 'localhost', '[::1]', 'testserver')` to `Settings`.
-- [ ] In `Settings.from_env()`, add this configuration parsing before `return cls(...)` and pass all three values into that constructor:
+- [x] Add `app_username: str = ''`, `app_password: str = field(default='', repr=False)`, and `allowed_hosts: tuple[str, ...] = ('127.0.0.1', 'localhost', '[::1]', 'testserver')` to `Settings`.
+- [x] In `Settings.from_env()`, add this configuration parsing before `return cls(...)` and pass all three values into that constructor:
 
 ```python
 app_username = os.getenv('APP_USERNAME', '')
@@ -40,8 +40,8 @@ if not allowed_hosts:
     raise ValueError('ALLOWED_HOSTS must contain at least one host')
 ```
 
-- [ ] Pass `app_username=app_username`, `app_password=app_password`, and `allowed_hosts=allowed_hosts` as arguments to `return cls(...)`.
-- [ ] Add this `Settings.__post_init__()` so direct construction also fails closed instead of silently disabling auth; reject `:` in the username because Basic Auth uses it as the credential separator:
+- [x] Pass `app_username=app_username`, `app_password=app_password`, and `allowed_hosts=allowed_hosts` as arguments to `return cls(...)`.
+- [x] Add this `Settings.__post_init__()` so direct construction also fails closed instead of silently disabling auth; reject `:` in the username because Basic Auth uses it as the credential separator:
 
 ```python
     def __post_init__(self):
@@ -50,7 +50,7 @@ if not allowed_hosts:
         if ':' in self.app_username:
             raise ValueError('APP_USERNAME must not contain a colon')
 ```
-- [ ] Add these documented entries to `.env.example`:
+- [x] Add these documented entries to `.env.example`:
 
 ```dotenv
 # Optional HTTP Basic Auth; set both values to protect every app route.
@@ -60,15 +60,15 @@ APP_PASSWORD=
 ALLOWED_HOSTS=127.0.0.1,localhost,[::1],testserver
 ```
 
-- [ ] Run `git diff --check -- app/config.py .env.example` and inspect only those diffs.
+- [x] Run `git diff --check -- app/config.py .env.example` and inspect only those diffs.
 
 ## Task 2: Protect all HTTP routes
 
 **Files:** `app/main.py`
 
-- [ ] Import `base64`, `binascii`, and `secrets`.
-- [ ] Pass `settings.allowed_hosts` to the existing `TrustedHostMiddleware`.
-- [ ] Add this HTTP middleware after `app = FastAPI(...)`; it covers the index, mounted static directory, API routes, and docs. `JSONResponse` is already imported.
+- [x] Import `base64`, `binascii`, and `secrets`.
+- [x] Pass `settings.allowed_hosts` to the existing `TrustedHostMiddleware`.
+- [x] Add this HTTP middleware after `app = FastAPI(...)`; it covers the index, mounted static directory, API routes, and docs. `JSONResponse` is already imported.
 
 ```python
     @app.middleware('http')
@@ -101,14 +101,14 @@ ALLOWED_HOSTS=127.0.0.1,localhost,[::1],testserver
         return await call_next(request)
 ```
 
-- [ ] Keep the existing same-origin write middleware in place. Do not add CORS or change API route contracts.
-- [ ] Run `git diff --check -- app/main.py` and inspect the changes.
+- [x] Keep the existing same-origin write middleware in place. Do not add CORS or change API route contracts.
+- [x] Run `git diff --check -- app/main.py` and inspect the changes.
 
 ## Task 3: Document and package the service
 
 **Files:** `deploy/vocabulary.service`, `README.md`
 
-- [ ] Create `deploy/vocabulary.service` with this content:
+- [x] Create `deploy/vocabulary.service` with this content:
 
 ```ini
 [Unit]
@@ -132,7 +132,7 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
-- [ ] Create `deploy/vocabulary-tunnel.service` with this content:
+- [x] Create `deploy/vocabulary-tunnel.service` with this content:
 
 ```ini
 [Unit]
@@ -156,7 +156,7 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
-- [ ] Add this README section after “Model and runtime configuration”:
+- [x] Add this README section after “Model and runtime configuration”:
 
 ```markdown
 ## Server demo
@@ -164,25 +164,25 @@ WantedBy=multi-user.target
 The server demo keeps its SQLite database at `/srv/database/data/vocabulary.sqlite3`. Its server-only `.env` sets `DATABASE_PATH`, `APP_USERNAME`, `APP_PASSWORD`, and `ALLOWED_HOSTS=82.156.102.68,*.trycloudflare.com`. Keep the `.env` private and out of Git. Uvicorn listens only on loopback port 8088, and a separate Cloudflare Quick Tunnel provides the public HTTPS URL. The generated password is for this demo only.
 ```
 
-- [ ] Ensure the README does not contain the real key or generated password.
-- [ ] Run `git diff --check -- README.md deploy/vocabulary.service` and inspect the changes.
+- [x] Ensure the README does not contain the real key or generated password.
+- [x] Run `git diff --check -- README.md deploy/vocabulary.service` and inspect the changes.
 
 ## Task 4: Review and commit the new version locally
 
 **Files:** intended app and documentation changes only.
 
-- [ ] Review all current diffs in `README.md`, `app/`, `docs/system-design.md`, `tests/test_api.py`, and `tests/test_learning.py`; these are existing local work that belongs to the version being deployed.
-- [ ] Add the required untracked app files `app/fill_translations.py`, `app/translate.py`, and `scripts/start_server.py`.
-- [ ] Do not stage `version control/v0.2/v0.2.xlsx`, `DatabaseEvidenceLog_completed.xlsx`, `DatabaseEvidenceLog_filled.xlsx`, `~$DatabaseEvidenceLog_completed.xlsx`, `scripts/render_final_evidence_qa.mjs`, `scripts/tune_evidence_package.mjs`, `tmp/`, `.env`, `data/`, or any log file.
-- [ ] Stage only the reviewed app, static assets, README, design/plan documents, and `deploy/vocabulary.service`.
-- [ ] Use this explicit staging command so unrelated generated files and the edited historical workbook remain unstaged:
+- [x] Review all current diffs in `README.md`, `app/`, `docs/system-design.md`, `tests/test_api.py`, and `tests/test_learning.py`; these are existing local work that belongs to the version being deployed.
+- [x] Add the required untracked app files `app/fill_translations.py`, `app/translate.py`, and `scripts/start_server.py`.
+- [x] Do not stage `version control/v0.2/v0.2.xlsx`, `DatabaseEvidenceLog_completed.xlsx`, `DatabaseEvidenceLog_filled.xlsx`, `~$DatabaseEvidenceLog_completed.xlsx`, `scripts/render_final_evidence_qa.mjs`, `scripts/tune_evidence_package.mjs`, `tmp/`, `.env`, `data/`, or any log file.
+- [x] Stage only the reviewed app, static assets, README, design/plan documents, and `deploy/vocabulary.service`.
+- [x] Use this explicit staging command so unrelated generated files and the edited historical workbook remain unstaged:
 
 ```powershell
 git add -- README.md .env.example requirements.lock.txt app/agent.py app/config.py app/db.py app/deepseek.py app/dictionary.py app/fill_translations.py app/learning.py app/main.py app/mcp_server.py app/repository.py app/schemas.py app/translate.py app/static/app.js app/static/index.html app/static/styles.css docs/system-design.md docs/superpowers/specs/2026-11-27-database-server-deployment-design.md docs/superpowers/plans/2026-11-27-database-public-deploy.md tests/test_api.py tests/test_learning.py scripts/start_server.py deploy/vocabulary.service deploy/vocabulary-tunnel.service
 ```
 
-- [ ] Run `git diff --cached --check`; commit as `feat: deploy vocabulary app with protected public access`.
-- [ ] Commit and push with:
+- [x] Run `git diff --cached --check`; commit as `feat: deploy vocabulary app with protected public access`.
+- [x] Commit and push with:
 
 ```powershell
 git commit -m "feat: deploy vocabulary app with protected public access"
@@ -190,14 +190,14 @@ git push --set-upstream origin codex/database-public-deploy
 git ls-remote origin refs/heads/master refs/heads/codex/database-public-deploy
 ```
 
-- [ ] Run `git status --short --branch` and confirm no secret or database file is staged.
-- [ ] Verify `origin/master` still resolves to the original `5027d18` commit. If branch push is rejected, retain the local branch and deploy its local archive instead.
+- [x] Run `git status --short --branch` and confirm no secret or database file is staged.
+- [x] Verify `origin/master` still resolves to the original `5027d18` commit. If branch push is rejected, retain the local branch and deploy its local archive instead.
 
 ## Task 5: Create safe deployment artifacts
 
 **Files:** temporary files under the ignored local `tmp/` directory only.
 
-- [ ] Use Python's SQLite backup API to make a consistent snapshot of `data/vocabulary.sqlite3` at `tmp/vocabulary-server-seed.sqlite3`; do not copy the live file directly or change the local database:
+- [x] Use Python's SQLite backup API to make a consistent snapshot of `data/vocabulary.sqlite3` at `tmp/vocabulary-server-seed.sqlite3`; do not copy the live file directly or change the local database:
 
 ```powershell
 @'
@@ -212,27 +212,27 @@ finally:
 '@ | & .\.venv\Scripts\python.exe -
 ```
 
-- [ ] Verify the snapshot has `PRAGMA user_version=2`, 79 rows in `words`, and 3 rows in `review_events`.
-- [ ] Verify the snapshot counts without printing vocabulary content:
+- [x] Verify the snapshot has `PRAGMA user_version=2`, 79 rows in `words`, and 3 rows in `review_events`.
+- [x] Verify the snapshot counts without printing vocabulary content:
 
 ```powershell
 & .\.venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('tmp/vocabulary-server-seed.sqlite3'); print('schema',c.execute('pragma user_version').fetchone()[0],'words',c.execute('select count(*) from words').fetchone()[0],'reviews',c.execute('select count(*) from review_events').fetchone()[0]); c.close()"
 ```
 
-- [ ] Create the committed source archive and verify its contents:
+- [x] Create the committed source archive and verify its contents:
 
 ```powershell
 git archive --format=zip --output=tmp/database-deploy.zip HEAD
 & .\.venv\Scripts\python.exe -c "import zipfile; n=zipfile.ZipFile('tmp/database-deploy.zip').namelist(); assert any(x.startswith('app/static/') for x in n) and 'deploy/vocabulary.service' in n and 'requirements.lock.txt' in n; assert not any(x == '.env' or x.startswith('data/') or '/logs/' in x or x.startswith('DatabaseEvidenceLog') or x.startswith('tmp/') for x in n); print('archive-ok',len(n))"
 ```
 
-- [ ] Generate a 24-character ASCII demo password into a PowerShell variable without echoing it:
+- [x] Generate a 24-character ASCII demo password into a PowerShell variable without echoing it:
 
 ```powershell
 $demoPassword = & .\.venv\Scripts\python.exe -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))"
 ```
 
-- [ ] Package the installed spaCy model and its metadata as a portable wheel because GitHub model downloads from the server are stalled:
+- [x] Package the installed spaCy model and its metadata as a portable wheel because GitHub model downloads from the server are stalled:
 
 ```powershell
 @'
@@ -255,16 +255,16 @@ with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6
 
 **Target:** `/srv/database/app` and `/srv/database/data` on `txy`.
 
-- [ ] Before creating files, check that the resolved paths `/srv/database/app` and `/srv/database/data` are safe deployment targets and do not contain an existing deployment. If an existing database is present, preserve it and do not overwrite it with the local snapshot.
-- [ ] Create `/srv/database/app`, `/srv/database/data`, and `/srv/database/app/logs`, owned by `ubuntu`; set directory permissions to owner-only where practical.
-- [ ] Create only the application and data directories after confirming there is no existing deployment at those exact paths. The command does not recursively change ownership of `/srv/database` or any unrelated directory:
+- [x] Before creating files, check that the resolved paths `/srv/database/app` and `/srv/database/data` are safe deployment targets and do not contain an existing deployment. If an existing database is present, preserve it and do not overwrite it with the local snapshot.
+- [x] Create `/srv/database/app`, `/srv/database/data`, and `/srv/database/app/logs`, owned by `ubuntu`; set directory permissions to owner-only where practical.
+- [x] Create only the application and data directories after confirming there is no existing deployment at those exact paths. The command does not recursively change ownership of `/srv/database` or any unrelated directory:
 
 ```powershell
 ssh txy "sudo -n test ! -e /srv/database/app && sudo -n test ! -e /srv/database/data"
 ssh txy "sudo -n install -d -o ubuntu -g ubuntu -m 750 /srv/database/app /srv/database/data /srv/database/app/logs"
 ```
 
-- [ ] Build the server `.env` in memory from the local `.env`; preserve every setting except replace `DATABASE_PATH` and add the three deployment settings. Stream it over SSH without printing it or modifying the local `.env`:
+- [x] Build the server `.env` in memory from the local `.env`; preserve every setting except replace `DATABASE_PATH` and add the three deployment settings. Stream it over SSH without printing it or modifying the local `.env`:
 
 ```powershell
 $serverEnv = @(Get-Content -LiteralPath .env | Where-Object { $_ -notmatch '^\s*(DATABASE_PATH|APP_USERNAME|APP_PASSWORD|ALLOWED_HOSTS)\s*=' })
@@ -275,7 +275,7 @@ $serverEnv += 'ALLOWED_HOSTS=82.156.102.68,*.trycloudflare.com'
 $serverEnv | ssh txy "umask 077; cat > /srv/database/app/.env; chmod 600 /srv/database/app/.env"
 ```
 
-- [ ] Upload and unpack the app. Seed SQLite only if it is not already present:
+- [x] Upload and unpack the app. Seed SQLite only if it is not already present:
 
 ```powershell
 scp tmp/database-deploy.zip txy:/tmp/database-deploy.zip
@@ -283,37 +283,37 @@ scp tmp/vocabulary-server-seed.sqlite3 txy:/srv/database/data/vocabulary-server-
 ssh txy "python3 -m zipfile -e /tmp/database-deploy.zip /srv/database/app && chmod 700 /srv/database/data && if [ ! -e /srv/database/data/vocabulary.sqlite3 ]; then install -o ubuntu -g ubuntu -m 600 /srv/database/data/vocabulary-server-seed.sqlite3 /srv/database/data/vocabulary.sqlite3; fi && chmod 600 /srv/database/app/.env /srv/database/data/vocabulary-server-seed.sqlite3"
 ```
 
-- [ ] Set the server `.env` to owner `ubuntu`, group `ubuntu`, mode `0600`; set the SQLite database and containing data directory to owner `ubuntu` and restrictive permissions.
-- [ ] Create a Python 3.12 virtual environment, install the locked dependencies except the GitHub-hosted spaCy model, then install the local model wheel:
+- [x] Set the server `.env` to owner `ubuntu`, group `ubuntu`, mode `0600`; set the SQLite database and containing data directory to owner `ubuntu` and restrictive permissions.
+- [x] Create a Python 3.12 virtual environment, install the locked dependencies except the GitHub-hosted spaCy model, then install the local model wheel:
 
 ```powershell
 scp tmp/en_core_web_sm-3.8.0-py3-none-any.whl txy:/tmp/en_core_web_sm-3.8.0-py3-none-any.whl
 ssh txy "set -e; python3 -m venv /srv/database/app/.venv; grep -v '^en_core_web_sm @' /srv/database/app/requirements.lock.txt > /tmp/vocabulary-requirements.txt; cd /srv/database/app; .venv/bin/python -m pip install -r /tmp/vocabulary-requirements.txt; .venv/bin/python -m pip install /tmp/en_core_web_sm-3.8.0-py3-none-any.whl; .venv/bin/python -c 'import spacy; nlp=spacy.load(\"en_core_web_sm\"); print(\"spacy-model\",nlp.meta[\"version\"])'"
 ```
 
-- [ ] Install both unit files, start `vocabulary.service`, and start the independent tunnel service:
+- [x] Install both unit files, start `vocabulary.service`, and start the independent tunnel service:
 
 ```powershell
 ssh txy "sudo -n install -o root -g root -m 644 /srv/database/app/deploy/vocabulary.service /etc/systemd/system/vocabulary.service && sudo -n install -o root -g root -m 644 /srv/database/app/deploy/vocabulary-tunnel.service /etc/systemd/system/vocabulary-tunnel.service && sudo -n systemctl daemon-reload && sudo -n systemctl enable --now vocabulary.service && sudo -n systemctl enable --now vocabulary-tunnel.service"
 ```
 
-- [ ] Remove the temporary `8088/tcp` UFW rule from the direct-access attempt; do not edit Nginx config, stop other services, or touch HippoArk.
+- [x] Remove the temporary `8088/tcp` UFW rule from the direct-access attempt; do not edit Nginx config, stop other services, or touch HippoArk.
 
 ```powershell
 ssh txy "sudo -n ufw --force delete allow 8088/tcp; sudo -n ufw status numbered"
 ```
-- [ ] Inspect `systemctl status vocabulary.service vocabulary-tunnel.service`, `ss -ltnp`, and `free -h`; confirm port 8088 listens only on `127.0.0.1`. If available memory remains healthy, leave Vibe-Trading and Neuromesh running.
+- [x] Inspect `systemctl status vocabulary.service vocabulary-tunnel.service`, `ss -ltnp`, and `free -h`; confirm port 8088 listens only on `127.0.0.1`. If available memory remains healthy, leave Vibe-Trading and Neuromesh running.
 
 ## Task 7: Verify the public site
 
-- [ ] Read the current public HTTPS URL from the dedicated tunnel journal:
+- [x] Read the current public HTTPS URL from the dedicated tunnel journal:
 
 ```powershell
 $publicUrl = (ssh txy "sudo -n journalctl -u vocabulary-tunnel.service --no-pager | grep -oE 'https://[[:alnum:].-]+trycloudflare.com' | tail -1").Trim()
 $publicUrl
 ```
 
-- [ ] From PowerShell, confirm the tunnel challenges unauthenticated users, then request the protected health and word count endpoints with the generated credentials. Assign the URL returned by the preceding command to `$baseUrl` and print only status and counts:
+- [x] From PowerShell, confirm the tunnel challenges unauthenticated users, then request the protected health and word count endpoints with the generated credentials. Assign the URL returned by the preceding command to `$baseUrl` and print only status and counts:
 
 ```powershell
 $baseUrl = $publicUrl
@@ -326,10 +326,10 @@ $rows = Invoke-RestMethod "$baseUrl/api/words/all?limit=1000" -Headers $headers 
 "health=$($health.status) model_configured=$($health.model_configured) words=$($rows.Count)"
 ```
 
-- [ ] Confirm `/api/health` returns `ok`, the word endpoint returns 79 entries, and the HTTP response does not contain the model key.
-- [ ] Verify the server-side SQLite file exists at `/srv/database/data/vocabulary.sqlite3` and contains 79 words.
-- [ ] Confirm the URL is reachable from outside the server and write down the current Quick Tunnel URL. It may change after the tunnel process restarts.
-- [ ] Report the working public URL, the generated username/password, the new branch URL if pushed, and whether existing services remained running.
+- [x] Confirm `/api/health` returns `ok`, the word endpoint returns 79 entries, and the HTTP response does not contain the model key.
+- [x] Verify the server-side SQLite file exists at `/srv/database/data/vocabulary.sqlite3` and contains 79 words.
+- [x] Confirm the URL is reachable from outside the server and write down the current Quick Tunnel URL. It may change after the tunnel process restarts.
+- [x] Report the working public URL, the generated username/password, the new branch URL if pushed, and whether existing services remained running.
 
 ## Scope and verification notes
 
