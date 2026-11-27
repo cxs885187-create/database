@@ -22,6 +22,12 @@ class Settings:
     app_password: str = field(default='', repr=False)
     allowed_hosts: tuple[str, ...] = ('127.0.0.1', 'localhost', '[::1]', 'testserver')
 
+    def __post_init__(self):
+        if bool(self.app_username) != bool(self.app_password):
+            raise ValueError('APP_USERNAME and APP_PASSWORD must both be set or both be empty')
+        if ':' in self.app_username:
+            raise ValueError('APP_USERNAME must not contain ":" for HTTP Basic Auth')
+
     @property
     def deepseek_model(self):
         return MODEL_ALIASES.get(self.deepseek_model_alias.lower(), self.deepseek_model_alias)
@@ -31,8 +37,6 @@ class Settings:
         load_dotenv(ROOT / '.env', override=False)
         app_username = os.getenv('APP_USERNAME', '')
         app_password = os.getenv('APP_PASSWORD', '')
-        if bool(app_username) != bool(app_password):
-            raise ValueError('APP_USERNAME and APP_PASSWORD must both be set or both be empty')
         allowed_hosts = tuple(host.strip() for host in os.getenv(
             'ALLOWED_HOSTS', '127.0.0.1,localhost,[::1],testserver'
         ).split(',') if host.strip())
