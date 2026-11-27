@@ -85,7 +85,9 @@ $('agent-form').onsubmit = async event => {
   $('scope').replaceChildren();
   $('result').replaceChildren();
   try { await stream('/api/agent/stream', { user_input, text, thread_id: threadId, source_id: currentSource }); }
-  catch (error) { $('notice').textContent = error.message; }
+  catch (error) {
+    $('notice').textContent = offlineMessage(error) || error.message;
+  }
 };
 function showScope(data) {
   const container = $('scope');
@@ -134,17 +136,18 @@ function renderResultStats(stats, parent) {
 function renderResultHighlights(highlights, parent) {
   const items = Array.isArray(highlights.items) ? highlights.items : [];
   if (items.length) {
-    element('h3', 'Top vocabulary', parent);
+    const hasMeaning = items.some(item => item.snippet !== undefined);
+    element('h3', hasMeaning ? 'Matching words' : 'Top vocabulary', parent);
     const wrap = element('div', undefined, parent); wrap.className = 'result-table-wrap';
     const table = element('table', undefined, wrap); table.className = 'result-table';
     const head = element('thead', undefined, table); const headRow = element('tr', undefined, head);
-    ['Rank', 'Word', 'Occurrences'].forEach(label => element('th', label, headRow));
+    ['Rank', 'Word', hasMeaning ? 'Meaning' : 'Occurrences'].forEach(label => element('th', label, headRow));
     const body = element('tbody', undefined, table);
     items.forEach(item => {
       const row = element('tr', undefined, body);
       element('td', String(item.rank ?? ''), row);
       const wordCell = element('td', undefined, row); action(item.word, () => detail(item.word_id), wordCell).className = 'word-link';
-      element('td', String(item.total_count ?? item.count ?? 0), row);
+      element('td', hasMeaning ? String(item.snippet ?? '') : String(item.total_count ?? item.count ?? 0), row);
     });
   }
   const newEntries = Array.isArray(highlights.new_entries) ? highlights.new_entries : [];
@@ -174,17 +177,37 @@ $('search-form').onsubmit = async event => {
     const query = $('query').value.trim();
     if (!query) return loadVocabulary();
     const results = await api('/api/wiki/search?q=' + encodeURIComponent(query) + '&limit=100');
-    const ids = new Set(results.map(result => result.word_id));
     const all = await api('/api/words/all');
-    renderVocabulary(all.filter(word => ids.has(word.id)), `Showing ${ids.size} matching words`);
+    const byId = new Map(all.map(word => [word.id, word]));
+    const rows = results.map(result => byId.get(result.word_id)).filter(Boolean);
+    const hits = new Map(results.map(result => [result.word_id, { fields: result.matched_in || [], snippet: result.snippet || '' }]));
+    renderVocabulary(rows, `Showing ${rows.length} matching words`, hits);
   } catch (error) { $('notice').textContent = error.message; }
 };
 $('clear-search').onclick = () => { $('query').value = ''; loadVocabulary().catch(error => { $('notice').textContent = error.message; }); };
+$('translate-missing').onclick = async () => {
+  const button = $('translate-missing');
+  button.disabled = true;
+  $('table-meta').textContent = 'Generating Chinese meanings...';
+  try {
+    const result = await api('/api/words/translate', 'POST');
+    await loadVocabulary();
+    $('table-meta').textContent = result.requested
+      ? `Added ${result.updated} Chinese meanings (${result.requested} were missing, ${result.failed} failed).`
+      : 'Every word already has a Chinese meaning.';
+  } catch (error) { $('notice').textContent = error.message; }
+  finally { button.disabled = false; }
+};
 async function loadVocabulary() {
   const all = await api('/api/words/all');
   renderVocabulary(all, `Showing all ${all.length} words`);
 }
-function renderVocabulary(words, meta) {
+const MATCH_LABELS = {
+  word: 'word', phonetic: 'phonetic', part_of_speech: 'part of speech', definition_en: 'meaning',
+  definition_zh: 'translation', example_sentences: 'example', usage_contexts: 'context',
+  semantic_tag: 'tag', difficulty: 'difficulty', note_body: 'note',
+};
+function renderVocabulary(words, meta, matches) {
   const body = $('vocabulary-rows');
   body.replaceChildren();
   $('table-meta').textContent = meta;
@@ -196,12 +219,43 @@ function renderVocabulary(words, meta) {
   words.forEach(word => {
     const row = element('tr', undefined, body);
     const wordCell = element('td', undefined, row); action(word.word, () => detail(word.id), wordCell).className = 'word-link';
+    const hit = matches && matches.get(word.id);
+    const wordOnly = !hit || hit.fields.includes('word');
+    if (hit && hit.fields.length && !wordOnly) {
+      const hint = element('span', ` (matched in ${hit.fields.map(field => MATCH_LABELS[field] || field).join(', ')})`, wordCell);
+      hint.className = 'match-hint';
+    }
     element('td', Array.isArray(word.part_of_speech) ? word.part_of_speech.join(', ') : (word.part_of_speech || '—'), row);
     element('td', word.definition_en || '—', row);
     element('td', word.definition_zh || '—', row);
     element('td', String(word.total_count ?? 0), row);
-    element('td', word.difficulty || '—', row);
+    const difficultyCell = element('td', undefined, row);
+    const difficulty = element('select', undefined, difficultyCell);
+    difficulty.setAttribute('aria-label', `Learning difficulty for ${word.word}`);
+    [['', 'Not set'], ['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']].forEach(([value, label]) => {
+      const option = element('option', label, difficulty); option.value = value;
+    });
+    difficulty.value = word.learning_difficulty || '';
+    difficulty.onchange = async () => {
+      const previous = word.learning_difficulty || '';
+      difficulty.disabled = true;
+      try {
+        await api('/api/words/' + word.id, 'PATCH', { learning_difficulty: difficulty.value || null });
+        word.learning_difficulty = difficulty.value || null;
+        $('table-meta').textContent = 'Difficulty saved. Future review intervals will use this level.';
+        $('notice').textContent = '';
+      } catch (error) {
+        difficulty.value = previous;
+        $('notice').textContent = error.message;
+      } finally { difficulty.disabled = false; }
+    };
     element('td', word.last_seen_at ? new Date(word.last_seen_at).toLocaleDateString() : '—', row);
+    if (hit && hit.snippet && !wordOnly) {
+      const matched = element('tr', undefined, body); matched.className = 'match-row';
+      const cell = element('td', undefined, matched); cell.colSpan = 7;
+      const label = element('span', 'Matched text: ', cell); label.className = 'match-hint';
+      element('em', hit.snippet, cell);
+    }
   });
 }
 async function detail(id) {
@@ -211,6 +265,12 @@ async function detail(id) {
   element('p', data.word.definition_en || 'No English definition yet.', parent);
   element('p', data.word.definition_zh || '', parent);
   element('p', `${data.word.total_count} recorded occurrences.`, parent);
+  const examples = Array.isArray(data.word.example_sentences) ? data.word.example_sentences : [];
+  if (examples.length) {
+    element('h4', 'Example sentences', parent);
+    const list = element('ul', undefined, parent); list.className = 'example-list';
+    examples.slice(0, 6).forEach(sentence => element('li', String(sentence), list));
+  }
   const metadata = element('form', undefined, parent);
   const definitionLabel = element('label', 'English definition', metadata);
   const definition = element('textarea', undefined, definitionLabel); definition.value = data.word.definition_en || '';
@@ -283,4 +343,24 @@ async function logs() {
   data.forEach(log => action(`${log.created_at} — ${log.summary}`, () => loadLog(log.log_id), $('activity')));
 }
 $('reload-logs').onclick = () => logs().catch(error => { $('notice').textContent = error.message; });
-api('/api/health').then(data => { $('health').textContent = data.model_configured ? `Agent: ${data.model} · temperature ${data.temperature}` : 'Set DEEPSEEK_API_KEY to enable the Agent. Wiki and learning are available locally.'; }).catch(error => { $('health').textContent = error.message; });
+function offlineMessage(error) {
+  const message = String(error && error.message || '');
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(message)) {
+    return `Cannot reach the local server at ${location.origin}. Start it with run.ps1, then reload this page.`;
+  }
+  return null;
+}
+async function checkHealth(attempt = 1) {
+  try {
+    const data = await api('/api/health');
+    $('health').textContent = data.model_configured
+      ? `Agent: ${data.model} · temperature ${data.temperature}`
+      : 'Set DEEPSEEK_API_KEY to enable the Agent. Wiki and learning are available locally.';
+  } catch (error) {
+    const offline = offlineMessage(error);
+    $('health').textContent = offline || error.message;
+    if (offline && attempt < 4) setTimeout(() => checkHealth(attempt + 1), 1500 * attempt);
+  }
+}
+
+checkHealth();

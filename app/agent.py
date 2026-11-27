@@ -1,6 +1,7 @@
 """Bounded LangChain tool calling over real MCP sessions and deterministic scope."""
 import asyncio
 import json
+import logging
 import re
 import time
 import uuid
@@ -9,9 +10,12 @@ from dataclasses import dataclass
 from langchain_core.messages import HumanMessage, SystemMessage
 from .analysis import apply_filter
 from .config import ROOT
-from .deepseek import ModelUnavailable
+from .deepseek import ModelProtocolError, ModelUnavailable
 from .repository import stamp
 from .schemas import Filter
+from .translate import TranslationService
+
+log = logging.getLogger('vocabulary.agent')
 
 PRESETS = {
     'top20':{'top_n':20},'new_only':{'exclude_existing':True},
@@ -32,8 +36,9 @@ class PendingScope:
     rounds: int = 1
 
 class VocabularyAgent:
-    def __init__(self,repository,analyzer,model,gateway,settings):
+    def __init__(self,repository,analyzer,model,gateway,settings,translations=None):
         self.repo,self.analyzer,self.model,self.gateway,self.settings = repository,analyzer,model,gateway,settings
+        self.translations = translations or TranslationService(repository,model)
         self.pending = {}
         self.locks = {}
         self.skills = '\n\n'.join((ROOT/'app'/'skills'/name).read_text(encoding='utf-8') for name in ('read.md','write.md','scope.md'))
@@ -70,21 +75,26 @@ class VocabularyAgent:
                 yield event('step',{'stage':'analysis','label':'Analyzing text with spaCy'})
                 text = request.text if request.text is not None else request.user_input
                 pool = await asyncio.to_thread(self.analyzer.analyze,text,{})
-                decision = await self.model.decide(request.user_input,pool.as_dict())
+                decision = await self.model.decide(request.user_input,{**pool.as_dict(),'library':self.repo.stats()})
                 # The second field accepts either an English article or a direct natural-language query.
                 # If it has no English tokens and the instruction is still the default import label,
                 # classify the actual query instead of forcing an ingest path.
                 default_instruction = 'import the vocabulary in this article'
                 if request.text and not pool.candidates and request.user_input.strip().lower() == default_instruction:
-                    decision = await self.model.decide(request.text, {'non_english_input': True})
+                    decision = await self.model.decide(request.text,{'non_english_input':True,'library':self.repo.stats()})
                 if decision.intent=='clarify':
                     yield event('clarify',{'question':decision.question or 'Paste an English article or ask about your vocabulary.'})
                     return
                 traces = [{'role':'agent','tool_name':None,'payload':{'decision':decision.model_dump()}}]
-                if decision.intent in {'lookup','top','log'}:
+                if decision.intent in {'lookup','search','top','log'}:
                     mode = decision.intent
                     limit = decision.filter.top_n or decision.limit
-                    payload = {'words':decision.lookup_words} if mode=='lookup' else {'limit':limit,'window':decision.window}
+                    if mode=='lookup':
+                        payload = {'words':decision.lookup_words}
+                    elif mode=='search':
+                        payload = {'query':decision.search_query or request.user_input,'limit':limit}
+                    else:
+                        payload = {'limit':limit,'window':decision.window}
                     yield event('step',{'stage':'tool_call','tool':'read_vocabulary','label':'Reading vocabulary'})
                     result = await self._tool_call('read_vocabulary',{'mode':mode,'payload':payload},traces)
                     yield event('step',{'stage':'tool_result','tool':'read_vocabulary','summary':'Read completed'})
@@ -112,8 +122,19 @@ class VocabularyAgent:
                 yield event('error',{'code':'agent_failed','message':self._safe_error(exc)})
 
     def _safe_error(self,exc):
+        # Log the real exception; the SSE payload stays short but actionable.
+        log.exception('Agent request failed (%s)',type(exc).__name__)
         if isinstance(exc,(ValueError,KeyError)):
             return str(exc)[:400]
+        if isinstance(exc,ModelProtocolError):
+            return str(exc)[:400]
+        name, text = type(exc).__name__.lower(), str(exc).lower()
+        if 'timeout' in name or 'timed out' in text:
+            return ('The model call timed out. Retry with the same source_id; if it keeps failing, '
+                    'check network or proxy access to DEEPSEEK_API_BASE.')
+        if any(token in name for token in ('connect','proxy','transfer','protocol')):
+            return ('The model endpoint could not be reached. Check the network, the proxy settings, and '
+                    'DEEPSEEK_API_BASE, then retry with the same source_id.')
         return 'Agent request failed. Check model connectivity and retry using the same source_id.'
 
     def _scope_payload(self,confirm_id,message=None):
@@ -183,9 +204,21 @@ class VocabularyAgent:
         yield event('step',{'stage':'tool_call','tool':'write_vocabulary','label':'Importing selected vocabulary'})
         result = await self._tool_call('write_vocabulary',{'entries':entries,'context':source_ref},traces)
         yield event('step',{'stage':'tool_result','tool':'write_vocabulary','summary':f"Imported {result['success']} selected words"})
+        translated = 0
+        if self.settings.auto_translate and self.translations.available and result['success']:
+            yield event('step',{'stage':'translation','label':'Adding Chinese meanings'})
+            try:
+                summary = await self.translations.fill([entry['word'] for entry in entries])
+                translated = summary.get('updated',0)
+                if summary.get('failed') or summary.get('error'):
+                    traces.append({'tool_name':None,'payload':{'translation':summary}})
+            except Exception as exc:
+                log.warning('Automatic translation failed: %s',type(exc).__name__)
+                traces.append({'tool_name':None,'payload':{'translation':{'error':type(exc).__name__}}})
         stats = {'tokens_processed':sum(pool.candidates.values()),'new_words':len(result['new_ids']),
                  'updated_words':len(result['updated_ids']),'skipped':pool.unique_words-len(entries),
-                 'write_success':result['success'],'write_failed':result['failed'],'duplicates':result['duplicates']}
+                 'write_success':result['success'],'write_failed':result['failed'],'duplicates':result['duplicates'],
+                 'translated_words':translated}
         async for item in self._finish('ingest_and_analyze',result,source_ref,stats,traces,filter_spec.model_dump()):
             yield item
 
@@ -210,6 +243,12 @@ class VocabularyAgent:
             highlights['top_frequency']=self.repo.top()
         else:
             highlights.update(result)
+            if intent in {'lookup','search'}:
+                highlights['items']=[{'rank':index+1,'word':match.get('word'),
+                                      'word_id':match.get('word_id'),
+                                      'snippet':re.sub(r'</?b>','',str(match.get('snippet') or match.get('definition_en') or '')),
+                                      'total_count':match.get('total_count')}
+                                     for index,match in enumerate(result.get('matches',[]))]
         payload = {'intent':intent,'summary':summary,'stats':stats,'highlights':highlights,
                    'source':{'type':'text','ref':source_ref,'ingested_at':stamp()} if source_ref else None,
                    'log_id':log_id,'warnings':warnings,'question':None}

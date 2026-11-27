@@ -12,9 +12,14 @@ def create_server(path,mode='read',dictionary_enabled=True):
     if mode=='read':
         @server.tool()
         def read_vocabulary(mode: str, payload: dict) -> dict:
-            """Read vocabulary only. mode is lookup, top, or log. Never mutates storage."""
+            """Read vocabulary only. mode is lookup, search, top, or log. Never mutates storage."""
             if mode=='lookup':
                 return {'matches':list(repository.lookup(payload.get('words',[])).values())}
+            if mode=='search':
+                query = str(payload.get('query','')).strip()
+                if not query:
+                    raise ValueError('Search requires a query')
+                return {'matches':repository.search(query,max(1,min(int(payload.get('limit',20)),100)))}
             if mode=='top':
                 return {'items':repository.top(max(1,min(int(payload.get('limit',20)),100)),payload.get('window','all'))}
             if mode=='log':

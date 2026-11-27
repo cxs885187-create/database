@@ -2,8 +2,10 @@
 import asyncio
 import base64
 import binascii
+import logging
 import secrets
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -20,8 +22,29 @@ from .learning import LearningService
 from .repository import VocabularyRepository
 from .schemas import AgentStreamRequest, AgentRespondRequest, NoteCreateRequest, NoteUpdateRequest, WordCreateRequest, WordUpdateRequest, LearnAnswerRequest
 from .tools import MCPGateway
+from .translate import TranslationService
+
+
+def configure_logging():
+    """Record agent failures with their real exception instead of only the SSE hint."""
+    logger = logging.getLogger('vocabulary')
+    if logger.handlers:
+        return logger
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+    try:
+        log_dir = ROOT/'logs'
+        log_dir.mkdir(parents=True,exist_ok=True)
+        file_handler = RotatingFileHandler(log_dir/'agent-errors.log',maxBytes=1_000_000,backupCount=3,encoding='utf-8')
+    except OSError:
+        file_handler = logging.StreamHandler()
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    return logger
 
 def create_app(settings=None,model=None):
+    configure_logging()
     settings = settings or Settings.from_env()
 
     @asynccontextmanager
@@ -30,9 +53,11 @@ def create_app(settings=None,model=None):
         analyzer = await asyncio.to_thread(Analyzer,settings.spacy_model)
         gateway = MCPGateway(settings)
         await gateway.start()
+        agent_model = model or DeepSeekClient(settings)
         app.state.repo = repository
         app.state.learning = LearningService(repository,settings.daily_new_limit)
-        app.state.agent = VocabularyAgent(repository,analyzer,model or DeepSeekClient(settings),gateway,settings)
+        app.state.translations = TranslationService(repository,agent_model)
+        app.state.agent = VocabularyAgent(repository,analyzer,agent_model,gateway,settings,app.state.translations)
         app.state.gateway = gateway
         try:
             yield
@@ -117,6 +142,12 @@ def create_app(settings=None,model=None):
     @app.get('/api/words/all')
     def all_words(limit: int = Query(default=1000,ge=1,le=1000)):
         return app.state.repo.list_words(limit)
+
+    @app.post('/api/words/translate')
+    async def translate_missing_words():
+        if not app.state.translations.available:
+            raise ValueError('Set DEEPSEEK_API_KEY to generate Chinese meanings')
+        return await app.state.translations.fill()
 
     @app.get('/api/words/{word_id}')
     def word_detail(word_id: int):

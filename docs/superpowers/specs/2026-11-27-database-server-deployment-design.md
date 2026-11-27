@@ -24,6 +24,7 @@ Deploy the current vocabulary database application to `82.156.102.68` and make i
 
 - Add optional `APP_USERNAME`, `APP_PASSWORD`, and `ALLOWED_HOSTS` settings. When username and password are configured, an application-wide HTTP Basic Auth middleware protects the index, static assets, API routes, and documentation. Local development remains unchanged when both credentials are unset.
 - Reject startup configuration where only one of username/password is set. Compare submitted credentials with constant-time comparison and return a Basic Auth challenge for missing or incorrect credentials.
+- Reject `:` in usernames because HTTP Basic uses it to separate username from password. Enforce credential invariants even when `Settings` is constructed directly, not only when loaded from `.env`.
 - Keep the existing local host allowlist as the default. The server environment adds `82.156.102.68` for the public deployment.
 - Keep the existing same-origin write check. The browser's origin and host are the same public IP and port, so application writes continue to work.
 

@@ -12,6 +12,8 @@ STEP_TYPES = {
     'relearning': [['en_to_zh'],['cloze_context']],
     'review': [['en_to_zh','zh_to_en','audio_to_zh','cloze_context','definition_match']],
 }
+INITIAL_INTERVAL_DAYS = {'hard':1,'medium':2,'easy':3}
+INTERVAL_MULTIPLIERS = {'hard':0.7,'medium':1.0,'easy':1.3}
 
 def edit_distance(left,right):
     previous = list(range(len(right)+1))
@@ -146,6 +148,9 @@ class LearningService:
             correct = str(answer).strip().casefold()==question['answer'].strip().casefold()
             rating = rating if correct else 0
             word_id = question['word_id']
+            word = conn.execute('SELECT learning_difficulty FROM words WHERE id=?',(word_id,)).fetchone()
+            difficulty = word['learning_difficulty'] or 'medium'
+            interval_multiplier = INTERVAL_MULTIPLIERS[difficulty]
             state = dict(conn.execute('SELECT * FROM learning_states WHERE word_id=?',(word_id,)).fetchone())
             if state['queue_state']=='mastered':
                 state['queue_state']='review'
@@ -162,14 +167,18 @@ class LearningService:
                 steps = 2 if state['queue_state']=='relearning' else 3
                 if state['step_index']>=steps:
                     state['queue_state']='review'
-                    state['interval_days']=max(1,state['interval_days'])
+                    if current in {'new','learning'}:
+                        state['interval_days']=INITIAL_INTERVAL_DAYS[difficulty]
+                    else:
+                        state['interval_days']=max(1,round(state['interval_days']*interval_multiplier))
                     state['repetitions'] += 1
                     due = utcnow()+timedelta(days=state['interval_days'])
                 else:
                     due = utcnow()+timedelta(minutes=1 if state['step_index']<=1 else 10)
             else:
                 interval = state['interval_days']
-                state['interval_days'] = max(1,round(interval*(1.2 if rating==2 else state['ease_factor']*(1.3 if rating==5 else 1))))
+                proposed = interval*(1.2 if rating==2 else state['ease_factor']*(1.3 if rating==5 else 1))
+                state['interval_days'] = max(1,round(proposed*interval_multiplier))
                 state['repetitions'] += 1
                 due = utcnow()+timedelta(days=state['interval_days'])
             state['ease_factor'] = max(1.3,state['ease_factor']+(.1-(5-rating)*(.08+(5-rating)*.02)))

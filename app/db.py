@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS words (
  id INTEGER PRIMARY KEY, word TEXT NOT NULL UNIQUE COLLATE NOCASE,
  phonetic TEXT, part_of_speech TEXT, definition_en TEXT, definition_zh TEXT,
  audio_url TEXT, example_sentences TEXT, usage_contexts TEXT,
+ learning_difficulty TEXT CHECK(learning_difficulty IS NULL OR learning_difficulty IN ('easy','medium','hard')),
  semantic_tag TEXT, difficulty TEXT, total_count INTEGER NOT NULL DEFAULT 0,
  first_seen_at TEXT, last_seen_at TEXT,
  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
@@ -69,7 +70,6 @@ CREATE TABLE IF NOT EXISTS agent_traces (
  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_trace_log ON agent_traces(log_id,step);
-PRAGMA user_version=1;
 """
 
 class Database:
@@ -80,10 +80,17 @@ class Database:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.connect() as conn:
                 version = conn.execute('PRAGMA user_version').fetchone()[0]
-                if version not in {0,1}:
+                if version not in {0,1,2}:
                     raise RuntimeError(f'Unsupported database schema version {version}; an explicit migration is required')
                 conn.execute('PRAGMA journal_mode=WAL')
                 conn.executescript(SCHEMA)
+                columns = {row['name'] for row in conn.execute('PRAGMA table_info(words)')}
+                if 'learning_difficulty' not in columns:
+                    conn.execute(
+                        "ALTER TABLE words ADD COLUMN learning_difficulty TEXT "
+                        "CHECK(learning_difficulty IS NULL OR learning_difficulty IN ('easy','medium','hard'))"
+                    )
+                conn.execute('PRAGMA user_version=2')
 
     @contextmanager
     def connect(self):

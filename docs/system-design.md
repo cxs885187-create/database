@@ -14,11 +14,11 @@ The Agent uses spaCy pre-analysis, a DeepSeek intent/filter decision, and bounde
 - A unique `(word_id, source_id)` key prevents retry double-counting. A batch fingerprint rejects reuse of the same source ID for changed counts or entries. Different IDs represent new encounters.
 - Ingestion fills missing metadata without overwriting curated fields. Explicit metadata changes use PATCH.
 - Timestamps use one UTC ISO format, including ranking windows and learning comparisons.
-- A stored-text FTS5 index uses word IDs as rowids. Application transactions synchronize words, grammatical labels, definitions, examples, contexts, tags, difficulty, and note text.
+- A stored-text FTS5 index uses word IDs as rowids. Application transactions synchronize words, grammatical labels, definitions, examples, contexts, tags, exam difficulty, study difficulty, and note text.
 - `[[word]]` links resolve on note save and when a formerly absent target is inserted. Foreign keys handle deletions.
 - IDs are UUID-based. Tool traces and action summaries are archived locally; secrets and model reasoning chains are not logged.
 
-The schema is version 1 and is created by `app/db.py`. Future releases must add an explicit migration before changing a populated schema. This release never rewrites historical Excel workbooks.
+The schema is version 2 and is created by `app/db.py`. Opening a version 1 database adds a nullable, validated study-difficulty field while preserving existing vocabulary and review state. Future releases must add an explicit migration before changing a populated schema. This release never rewrites historical Excel workbooks.
 
 ## Agent and scope
 
@@ -36,7 +36,7 @@ Markdown notes support CRUD, safe rendering, resolved internal links, and backli
 
 ## Learning
 
-The scheduler implements `new`, `learning`, `review`, `relearning`, and `mastered`. Minute-based steps precede day-based review. Ease has a lower bound; rating zero resets a review item into relearning. Mastered words become due after 90 days.
+The scheduler implements `new`, `learning`, `review`, `relearning`, and `mastered`. Minute-based steps precede day-based review. The separate study-difficulty field accepts `hard`, `medium`, and `easy`; unset values act as `medium`. Completing initial learning schedules the first review after 1, 2, or 3 days, respectively. Subsequent successful review intervals multiply the SM-2-style proposal by `0.7`, `1.0`, or `1.3`, respectively. Failed answers retain the existing minute-based relearning behavior. Ease has a lower bound; rating zero resets a review item into relearning. Mastered words become due after 90 days.
 
 All six question types are present: `en_to_zh`, `zh_to_en`, `audio_to_zh`, `cloze_context`, `spelling`, and `definition_match`. Choice questions require three distinct same-POS distractors. Word choices additionally require edit distance greater than two. Cloze uses a whole-word example match and enough remaining context. Missing data removes unavailable question types; no valid scheduled type produces a first-contact card without advancing state.
 

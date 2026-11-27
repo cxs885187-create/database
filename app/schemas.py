@@ -11,9 +11,10 @@ class Filter(BaseModel):
     sort_by: Literal['frequency_desc','alphabetical'] = 'frequency_desc'
 
 class Decision(BaseModel):
-    intent: Literal['ingest','ingest_and_analyze','lookup','top','log','clarify']
+    intent: Literal['ingest','ingest_and_analyze','lookup','search','top','log','clarify']
     filter: Filter = Field(default_factory=Filter)
     lookup_words: list[str] = Field(default_factory=list,max_length=100)
+    search_query: str | None = Field(default=None,max_length=120)
     limit: int = Field(default=20,ge=1,le=100)
     window: Literal['all','7d','30d'] = 'all'
     question: str | None = None
@@ -64,6 +65,7 @@ class WordUpdateRequest(BaseModel):
     usage_contexts: list[str] | None = None
     semantic_tag: str | None = None
     difficulty: Literal['cet4','cet6','toefl','gre'] | None = None
+    learning_difficulty: Literal['easy','medium','hard'] | None = None
 
 class LearnAnswerRequest(BaseModel):
     question_id: str

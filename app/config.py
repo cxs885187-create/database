@@ -18,6 +18,7 @@ class Settings:
     dictionary_enabled: bool = True
     daily_new_limit: int = 10
     session_ttl_seconds: int = 1800
+    auto_translate: bool = True
     app_username: str = ''
     app_password: str = field(default='', repr=False)
     allowed_hosts: tuple[str, ...] = ('127.0.0.1', 'localhost', '[::1]', 'testserver')
@@ -52,6 +53,7 @@ class Settings:
             dictionary_enabled=os.getenv('DICTIONARY_ENABLED', 'true').lower() in {'true','1','yes'},
             daily_new_limit=int(os.getenv('DAILY_NEW_LIMIT','10')),
             session_ttl_seconds=int(os.getenv('SESSION_TTL_SECONDS','1800')),
+            auto_translate=os.getenv('AUTO_TRANSLATE', 'true').lower() in {'true','1','yes'},
             app_username=app_username,
             app_password=app_password,
             allowed_hosts=allowed_hosts,

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 JSON_FIELDS = {'part_of_speech': [], 'example_sentences': [], 'usage_contexts': []}
 METADATA = ('phonetic','part_of_speech','definition_en','definition_zh','audio_url',
-            'example_sentences','usage_contexts','semantic_tag','difficulty')
+            'example_sentences','usage_contexts','semantic_tag','difficulty','learning_difficulty')
 
 def utcnow():
     return datetime.now(UTC)
@@ -110,18 +110,33 @@ class VocabularyRepository:
             self._sync_fts(conn,word_id)
         return self.word_detail(word_id)
 
-    def update_translations(self, translations):
+    def update_translations(self, translations, overwrite=False):
         """Fill missing Chinese meanings and refresh FTS without changing counts."""
         changed = 0
         with self.db.transaction() as conn:
             for word, translation in translations.items():
                 row = conn.execute('SELECT id, definition_zh FROM words WHERE lower(word)=?', (word.lower(),)).fetchone()
-                if not row or row['definition_zh']:
+                if not row or (row['definition_zh'] and not overwrite):
                     continue
                 conn.execute('UPDATE words SET definition_zh=? WHERE id=?', (translation, row['id']))
                 self._sync_fts(conn, row['id'])
                 changed += 1
         return changed
+
+    def missing_translations(self, words=None):
+        """Return entries that still have no Chinese meaning, most frequent first."""
+        sql = ("SELECT id, word, definition_en, part_of_speech FROM words "
+               "WHERE (definition_zh IS NULL OR definition_zh='')")
+        params = []
+        if words:
+            wanted = sorted({str(word).strip().lower() for word in words if str(word).strip()})
+            if not wanted:
+                return []
+            sql += f" AND lower(word) IN ({','.join('?' for _ in wanted)})"
+            params = wanted
+        sql += ' ORDER BY total_count DESC, lower(word) LIMIT 500'
+        with self.db.connect() as conn:
+            return [dict(row) for row in conn.execute(sql, params)]
 
     def top(self,limit=20,window='all'):
         if window not in {'all','7d','30d'}:
@@ -133,28 +148,83 @@ class VocabularyRepository:
                 rows = conn.execute('SELECT w.word,SUM(o.count) AS total_count FROM words w JOIN occurrences o ON w.id=o.word_id WHERE o.occurred_at>=? GROUP BY w.id ORDER BY total_count DESC,w.word LIMIT ?',(stamp(utcnow()-timedelta(days=int(window[:-1]))),limit)).fetchall()
         return [{**dict(row),'rank':i+1} for i,row in enumerate(rows)]
 
+    def stats(self):
+        """Library size and coverage, used to keep the model from guessing."""
+        with self.db.connect() as conn:
+            total = conn.execute('SELECT COUNT(*) FROM words').fetchone()[0]
+            translated = conn.execute("SELECT COUNT(*) FROM words WHERE definition_zh IS NOT NULL AND definition_zh<>''").fetchone()[0]
+            top = [row['word'] for row in conn.execute('SELECT word FROM words ORDER BY total_count DESC, lower(word) LIMIT 8')]
+        return {'total_words':total,'with_chinese_meaning':translated,'most_frequent':top}
+
     def list_words(self, limit=1000):
         """Return the complete reader-facing vocabulary rows, ordered for scanning."""
         with self.db.connect() as conn:
             rows = conn.execute(
                 """SELECT id, word, part_of_speech, definition_en, definition_zh,
-                          total_count, difficulty, last_seen_at
+                          total_count, difficulty, learning_difficulty, last_seen_at
                    FROM words ORDER BY lower(word), id LIMIT ?""",
                 (max(1, min(int(limit), 1000)),),
             ).fetchall()
         return [decode(row) for row in rows]
+
+    SEARCH_FIELDS = ('word','phonetic','part_of_speech','definition_en','definition_zh',
+                     'example_sentences','usage_contexts','semantic_tag','difficulty','note_body')
+
+    @staticmethod
+    def _matching_sentence(raw,terms):
+        """Pick the stored example sentence that actually contains a query term."""
+        if not raw:
+            return None
+        try:
+            sentences = json.loads(raw)
+        except (ValueError,TypeError):
+            sentences = [raw]
+        if isinstance(sentences,str):
+            sentences = [sentences]
+        for sentence in sentences if isinstance(sentences,list) else []:
+            text = str(sentence).strip()
+            if text and any(term in text.lower() for term in terms):
+                return text
+        return None
 
     def search(self,query,limit=20):
         terms = re.findall(r"[\w'-]+",query)
         if not terms:
             return []
         q = ' AND '.join('"'+term.replace('"','')+'"*' for term in terms)
+        lowered = [term.lower() for term in terms]
         with self.db.connect() as conn:
-            rows = conn.execute("SELECT rowid AS word_id,word,snippet(words_fts,-1,'<b>','</b>','...',12) AS snippet,bm25(words_fts) AS rank FROM words_fts WHERE words_fts MATCH ? ORDER BY rank LIMIT ?",(q,limit)).fetchall()
+            rows = conn.execute(
+                "SELECT rowid AS word_id, word, bm25(words_fts) AS rank FROM words_fts WHERE words_fts MATCH ? LIMIT ?",
+                (q,max(1,int(limit))*3)).fetchall()
             if not rows:
                 literal = query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
-                rows = conn.execute("SELECT id AS word_id,word,COALESCE(definition_en,'') AS snippet,0 AS rank FROM words WHERE word LIKE ? ESCAPE '\\' ORDER BY word LIMIT ?",('%'+literal+'%',limit)).fetchall()
-        return [dict(row) for row in rows]
+                fallback = conn.execute(
+                    "SELECT id AS word_id, word, COALESCE(definition_en,'') AS snippet, 0 AS rank FROM words WHERE word LIKE ? ESCAPE '\\' ORDER BY word LIMIT ?",
+                    ('%'+literal+'%',limit)).fetchall()
+                return [dict(row)|{'matched_in':['word']} for row in fallback]
+            results = []
+            for row in rows:
+                columns = conn.execute(
+                    'SELECT '+','.join(self.SEARCH_FIELDS)+' FROM words_fts WHERE rowid=?',(row['word_id'],)).fetchone()
+                if not columns:
+                    continue
+                matched = [name for name in self.SEARCH_FIELDS if any(term in (columns[name] or '').lower() for term in lowered)]
+                if not matched:
+                    continue
+                # Show the text that caused the hit, so an example-only match is self-explanatory.
+                snippet = self._matching_sentence(columns['example_sentences'],lowered)
+                if not snippet:
+                    snippet = columns['definition_en'] or columns['example_sentences'] or ''
+                results.append({'word_id':row['word_id'],'word':row['word'],'snippet':snippet,
+                                'rank':row['rank'],'matched_in':matched})
+            # A word match outranks a hit that only came from an example or a note.
+            def order(item):
+                word = item['word'].lower()
+                tier = 0 if word in lowered else 1 if any(word.startswith(term) for term in lowered) else 2
+                return (tier,item['rank'])
+            results.sort(key=order)
+        return results[:limit]
 
     def word_detail(self,word_id):
         with self.db.connect() as conn:
